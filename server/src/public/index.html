@@ -516,6 +516,48 @@
     </div>
   </div>
 
+  <!-- ── LIVE QUERY PANEL ─────────────────────────────────────────────── -->
+  <div class="section-title" style="margin-top:24px">
+    ⚡ Live Query  <span id="mode-badge" style="font-size:0.8rem;margin-left:12px;font-weight:500">checking…</span>
+  </div>
+  <div class="panel" style="margin-bottom:24px">
+    <div class="panel-header">
+      <div class="panel-title">🤖 Ask VendingAgent (Real Data)</div>
+      <span style="font-size:0.8rem;color:var(--muted)">Calls the real API endpoint — result appears in the transactions table below</span>
+    </div>
+    <div class="panel-body">
+      <!-- Query input row -->
+      <div class="query-input-row" style="margin-bottom:16px">
+        <input id="live-query-input" class="query-input" type="text"
+          placeholder="e.g. What is the price of HBAR? / Bitcoin price / AAPL stock"
+          value="What is the current price of HBAR?" />
+        <button class="btn-primary" id="btn-live-query" onclick="runLiveQuery()">
+          ▶ Send
+        </button>
+      </div>
+
+      <!-- Quick example chips -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+        <span style="font-size:0.75rem;color:var(--muted);align-self:center">Quick queries:</span>
+        <button class="btn-secondary" style="font-size:0.75rem;padding:4px 10px"
+          onclick="document.getElementById('live-query-input').value='What is the HBAR price?'">HBAR Price</button>
+        <button class="btn-secondary" style="font-size:0.75rem;padding:4px 10px"
+          onclick="document.getElementById('live-query-input').value='What is the Bitcoin price?'">Bitcoin</button>
+        <button class="btn-secondary" style="font-size:0.75rem;padding:4px 10px"
+          onclick="document.getElementById('live-query-input').value='Ethereum price?'">Ethereum</button>
+        <button class="btn-secondary" style="font-size:0.75rem;padding:4px 10px"
+          onclick="document.getElementById('live-query-input').value='What is the AAPL stock price?'">AAPL</button>
+        <button class="btn-secondary" style="font-size:0.75rem;padding:4px 10px"
+          onclick="document.getElementById('live-query-input').value='Current price of TSLA?'">TSLA</button>
+      </div>
+
+      <!-- Result box -->
+      <div id="live-result-box" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;font-family:var(--mono);font-size:0.82rem;line-height:1.7">
+        <div id="live-result-content"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Simulate + Flow Visualizer -->
   <div class="section-title">Interactive Simulator</div>
   <div class="two-col">
@@ -939,6 +981,93 @@
   setInterval(pollTransactions, 4000);
   pollMetrics();
   pollTransactions();
+
+  // ── Live Query (real API call from browser) ───────────────────────────────
+
+  async function runLiveQuery() {
+    const btn   = document.getElementById('btn-live-query');
+    const input = document.getElementById('live-query-input');
+    const box   = document.getElementById('live-result-box');
+    const content = document.getElementById('live-result-content');
+    const query = input.value.trim();
+    if (!query) return;
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Processing…';
+    box.style.display = 'block';
+    content.innerHTML = `<span style="color:var(--muted)">⏳ Sending query to VendingAgent…</span>`;
+
+    try {
+      const res = await fetch('/api/v1/demo-query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        content.innerHTML = `<span style="color:var(--danger)">❌ Error: ${data.message || data.error || 'Unknown error'}</span>`;
+        return;
+      }
+
+      const tx   = data.meta?.hedgera;
+      const tee  = data.meta?.confidentialCompute;
+      const d    = data.data;
+      const quote = d?.['Global Quote'] || d || {};
+      const symbol = quote['01. symbol'] || '—';
+      const price  = quote['05. price']  || quote.price || '—';
+      const change = quote['09. change'] || '—';
+      const pct    = quote['10. change percent'] || '—';
+      const vol    = quote['06. volume']  || '—';
+      const isReal = tx?.hashscanUrl && tx.hashscanUrl !== 'null' && tx.hashscanUrl !== null;
+
+      const hashscanLink = isReal
+        ? `<a href="${tx.hashscanUrl}" target="_blank" rel="noopener"
+             style="color:var(--accent);text-decoration:none">
+             ${tx.transactionId} ↗ HashScan
+           </a>`
+        : `<span style="color:var(--muted)">${tx?.transactionId || 'mock-tx'} (mock mode)</span>`;
+
+      content.innerHTML = `
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div>
+    <div style="color:var(--muted);font-size:0.72rem;margin-bottom:4px">📊 MARKET DATA (Chainlink CRE TEE)</div>
+    <div style="color:var(--green);font-size:1.4rem;font-weight:700">${symbol}</div>
+    <div style="font-size:1.1rem;margin:4px 0">$${price}</div>
+    <div style="color:${parseFloat(change)>=0?'var(--green)':'var(--danger)'}">
+      ${change} (${pct})
+    </div>
+    <div style="color:var(--muted);margin-top:6px;font-size:0.78rem">Volume: ${Number(vol).toLocaleString() || vol}</div>
+  </div>
+  <div>
+    <div style="color:var(--muted);font-size:0.72rem;margin-bottom:4px">💰 HEDERA SETTLEMENT</div>
+    <div style="font-size:0.8rem;margin-bottom:6px">${hashscanLink}</div>
+    <div style="color:var(--muted);font-size:0.72rem;margin-bottom:2px">Amount Paid</div>
+    <div style="color:var(--hedera)">${tx?.amountPaid || '0.5 HBAR'}</div>
+    <div style="color:var(--muted);font-size:0.72rem;margin-top:8px;margin-bottom:2px">🔒 TEE ATTESTATION</div>
+    <div style="word-break:break-all;font-size:0.7rem;color:var(--accent)">${(tee?.attestation||'').slice(0,48)}…</div>
+    <div style="color:var(--green);font-size:0.75rem;margin-top:4px">✅ executedInTee: ${tee?.executedInTee}</div>
+  </div>
+</div>
+      `;
+
+      // force the tx table to refresh immediately
+      lastTxCount = 0;
+      await pollTransactions();
+
+    } catch (err) {
+      content.innerHTML = `<span style="color:var(--danger)">❌ Request failed: ${err.message}</span>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '▶ Send';
+    }
+  }
+
+  // Allow Enter key to submit
+  document.getElementById('live-query-input')
+    .addEventListener('keydown', e => { if (e.key === 'Enter') runLiveQuery(); });
+
 </script>
 </body>
 </html>

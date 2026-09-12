@@ -173,6 +173,73 @@ async function start(): Promise<void> {
     mockMode: process.env.MOCK_PAYMENTS === 'true',
   }));
 
+  // ── Demo Query (browser-initiated, no payment cycle) ──────────────────────
+  // Called by the web dashboard's "Live Query" panel. Calls the real TEE
+  // upstream and records the result as a transaction — no client wallet needed.
+  server.post<{ Body: { query: string } }>(
+    '/api/v1/demo-query',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['query'],
+          properties: { query: { type: 'string', minLength: 1, maxLength: 500 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { query } = request.body;
+      const priceHbar = process.env.X402_PRICE_HBAR || '0.5';
+      const isMock    = process.env.MOCK_PAYMENTS === 'true';
+      const merchantId = process.env.X402_MERCHANT_ACCOUNT_ID || 'demo';
+
+      server.log.info({ query }, '🌐 Demo query from dashboard');
+
+      const result = await callConfidentialUpstream(query, {});
+
+      // Record as a "web-demo" transaction in the live feed
+      const demoTxId   = `web-demo@${Date.now()}`;
+      const hashscanId = null; // no real Hedera tx for browser demo
+      addTxRecord({
+        id: result.queryId,
+        transactionId: demoTxId,
+        hashscanUrl: isMock ? '#' : null as any,
+        amount: `${priceHbar} HBAR (demo)`,
+        from: 'web-browser',
+        to: merchantId,
+        query: query.slice(0, 80),
+        attestation: result.attestation,
+        timestamp: new Date().toISOString(),
+        status: 'confirmed',
+      });
+
+      requestCount++;
+      paymentTotal += parseFloat(priceHbar);
+
+      return reply.code(200).send({
+        success: true,
+        data: result.payload,
+        meta: {
+          queryId: result.queryId,
+          hedgera: {
+            transactionId: demoTxId,
+            hashscanUrl: null,
+            settlementStatus: 'demo',
+            amountPaid: `${priceHbar} HBAR`,
+            note: 'Browser demo query — run agent/client.ts for real on-chain Hedera payment',
+          },
+          confidentialCompute: {
+            provider: 'Chainlink CRE',
+            attestation: result.attestation,
+            executedInTee: true,
+            enclaveId: result.enclaveId,
+          },
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+  );
+
   // ── Error Handling ─────────────────────────────────────────────────────────
   server.setErrorHandler(async (error, _request, reply) => {
     if (error instanceof X402ChallengeError) return;
