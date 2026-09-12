@@ -1,0 +1,54 @@
+{
+  "workflow": {
+    "name": "vending-agent-confidential",
+    "version": "1.0.0",
+    "description": "VendingAgent CRE Confidential Workflow – fetches premium Web2 API data inside a TEE enclave with injected secrets",
+    "author": "VendingAgent @ ETHOnline 2026",
+    "type": "confidential",
+    "handler": "cre/workflow.ts",
+    "entryPoint": "handlerInTee"
+  },
+  "trigger": {
+    "type": "http",
+    "path": "/api/v1/query",
+    "method": "POST",
+    "description": "Triggered by the VendingAgent server after payment verification"
+  },
+  "secrets": {
+    "UPSTREAM_API_KEY": {
+      "description": "AlphaVantage premium API key – injected inside TEE only",
+      "required": true,
+      "simulatedValue": "demo-alphavantage-key-for-simulation"
+    }
+  },
+  "simulation": {
+    "testInput": {
+      "query": "What is the current price of HBAR?",
+      "queryId": "test-query-001",
+      "symbol": "HBAR"
+    },
+    "expectedOutputFields": ["payload", "queryId", "enclaveExecuted", "attestationTimestamp"],
+    "mockSecrets": {
+      "UPSTREAM_API_KEY": "test-api-key-12345"
+    },
+    "mockUpstreamResponse": {
+      "Global Quote": {
+        "01. symbol": "HBAR",
+        "02. open": "0.0810",
+        "03. high": "0.0842",
+        "04. low": "0.0795",
+        "05. price": "0.0831",
+        "06. volume": "3284710",
+        "07. latest trading day": "2026-09-11",
+        "08. previous close": "0.0818",
+        "09. change": "0.0013",
+        "10. change percent": "1.5891%"
+      }
+    }
+  },
+  "don": {
+    "network": "ethereum-sepolia",
+    "donId": "fun-ethereum-sepolia-1",
+    "subscriptionId": "YOUR_SUBSCRIPTION_ID"
+  }
+}
