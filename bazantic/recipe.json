@@ -1,0 +1,203 @@
+{
+  "$schema": "https://bazantic.com/schemas/recipe/v1.json",
+  "id": "vending-agent-market-intelligence",
+  "name": "VendingAgent Market Intelligence",
+  "version": "1.0.0",
+  "description": "Confidential pay-per-call market intelligence gateway. Returns attested financial and crypto data computed inside a Chainlink CRE TEE enclave, gated by Hedera x402 HBAR micropayments via Blocky402.",
+  "author": "VendingAgent Team – ETHOnline 2026",
+  "tags": ["finance", "crypto", "hedera", "chainlink", "tee", "x402", "micropayment", "market-data"],
+  "category": "Financial Intelligence",
+
+  "gateway": {
+    "type": "x402",
+    "protocol": "MPP",
+    "version": "1",
+    "baseUrl": "http://localhost:3000",
+    "payment": {
+      "network": "hedera-testnet",
+      "denomination": "HBAR",
+      "denominationUnit": "tinybar",
+      "amountPerCall": 0.5,
+      "amountPerCallTinybars": 50000000,
+      "facilitator": "Blocky402",
+      "facilitatorUrl": "https://api.blocky402.com/v1"
+    },
+    "authentication": {
+      "type": "x402-token",
+      "headerName": "Authorization",
+      "headerPrefix": "x402",
+      "tokenEncoding": "base64-json"
+    }
+  },
+
+  "ingredients": [
+    {
+      "id": "vending_query",
+      "name": "vending_query",
+      "description": "Query VendingAgent for attested market intelligence. Handles x402 micropayment automatically.",
+      "method": "POST",
+      "path": "/api/v1/query",
+      "contentType": "application/json",
+      "paymentRequired": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural language question, e.g. 'What is the current price of HBAR?'",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "context": {
+            "type": "object",
+            "description": "Optional context hints",
+            "properties": {
+              "symbol": {
+                "type": "string",
+                "description": "Ticker symbol override (HBAR, BTC, ETH, AAPL, etc.)",
+                "pattern": "^[A-Z]{1,10}$"
+              }
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["success", "data", "meta"],
+        "properties": {
+          "success": { "type": "boolean" },
+          "data": {
+            "type": "object",
+            "description": "Sanitized market data from Chainlink CRE TEE enclave",
+            "properties": {
+              "Global Quote": {
+                "type": "object",
+                "properties": {
+                  "01. symbol":             { "type": "string" },
+                  "05. price":              { "type": "string" },
+                  "06. volume":             { "type": "string" },
+                  "09. change":             { "type": "string" },
+                  "10. change percent":     { "type": "string" },
+                  "07. latest trading day": { "type": "string" }
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "queryId": { "type": "string" },
+              "hedgera": {
+                "type": "object",
+                "properties": {
+                  "transactionId":    { "type": "string", "description": "Hedera testnet transaction ID" },
+                  "settlementStatus": { "type": "string", "enum": ["confirmed", "pending"] },
+                  "amountPaid":       { "type": "string", "example": "0.5 HBAR" }
+                }
+              },
+              "confidentialCompute": {
+                "type": "object",
+                "properties": {
+                  "provider":       { "type": "string", "example": "Chainlink CRE" },
+                  "attestation":    { "type": "string", "description": "SHA-256 TEE attestation proof (tee:<enclaveId>:<hash>)" },
+                  "executedInTee":  { "type": "boolean" },
+                  "enclaveId":      { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get_service_info",
+      "name": "get_vending_pricing",
+      "description": "Retrieve pricing, network, and capability information. Call before vending_query to understand cost.",
+      "method": "GET",
+      "path": "/api/v1/info",
+      "paymentRequired": false,
+      "inputSchema": { "type": "object", "properties": {} },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "pricePerCall": {
+            "type": "object",
+            "properties": {
+              "amount":          { "type": "number" },
+              "amountTinybars":  { "type": "integer" },
+              "denomination":    { "type": "string" },
+              "network":         { "type": "string" },
+              "facilitator":     { "type": "string" },
+              "merchantAccount": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  ],
+
+  "llmGuidance": {
+    "whenToUse": [
+      "User asks for crypto prices (HBAR, BTC, ETH, LINK, SOL, AVAX)",
+      "User asks for stock market quotes (AAPL, TSLA, MSFT, NVDA, IBM)",
+      "User needs market data with privacy guarantees or TEE attestation",
+      "User wants to pay per-use instead of subscribing to an API"
+    ],
+    "preconditions": [
+      "Agent wallet must have ≥ 50,000,000 tinybars (0.5 HBAR) on Hedera Testnet",
+      "AGENT_HEDERA_ACCOUNT_ID and AGENT_HEDERA_PRIVATE_KEY must be set",
+      "VendingAgent server must be running on SERVER_BASE_URL"
+    ],
+    "stepByStepForLLM": [
+      {
+        "step": 1,
+        "action": "Call get_vending_pricing to understand current cost",
+        "reason": "Confirm the agent has enough HBAR before committing to a query"
+      },
+      {
+        "step": 2,
+        "action": "Call check_agent_wallet to verify HBAR balance",
+        "reason": "Prevent failed transactions due to insufficient funds"
+      },
+      {
+        "step": 3,
+        "action": "Call vending_query with the user's question",
+        "reason": "This tool auto-handles the x402 payment and returns attested market data",
+        "note": "The tool will automatically: (a) probe for 402 challenge, (b) sign Hedera payment, (c) retry with Authorization header"
+      },
+      {
+        "step": 4,
+        "action": "Present the data to the user with the Hedera transaction ID",
+        "reason": "The transaction ID proves payment and can be verified on HashScan testnet explorer"
+      }
+    ],
+    "fallbackStrategy": "If vending_query returns an error, check wallet balance with check_agent_wallet. If insufficient, inform the user they need testnet HBAR from https://portal.hedera.com/"
+  },
+
+  "mcp": {
+    "serverCommand": "npx ts-node --transpile-only bazantic/mcp-server.ts",
+    "transport": "stdio",
+    "tools": ["vending_query", "get_vending_pricing", "check_agent_wallet"]
+  },
+
+  "confidentialCompute": {
+    "provider": "Chainlink CRE",
+    "mode": "handlerInTee",
+    "attestation": true,
+    "workflowFile": "cre/workflow.ts",
+    "secretsInjected": ["API_KEY"],
+    "description": "All upstream API calls execute inside a hardware TEE. secrets.API_KEY is injected by CRE Secrets Manager and never leaves the enclave."
+  },
+
+  "links": {
+    "github": "https://github.com/your-org/vending-agent",
+    "dashboard": "http://localhost:3000",
+    "hedera_portal": "https://portal.hedera.com",
+    "hashscan": "https://hashscan.io/testnet",
+    "blocky402": "https://blocky402.com",
+    "chainlink_cre": "https://docs.chain.link/chainlink-runtime-environment",
+    "x402_spec": "https://x402.org",
+    "bazantic": "https://bazantic.com"
+  }
+}
