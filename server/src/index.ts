@@ -9,6 +9,25 @@ import { callConfidentialUpstream } from './services/upstream';
 let requestCount = 0;
 let paymentTotal = 0;
 
+// ── Recent Transactions Store (last 20, shown on dashboard) ───────────────────
+interface TxRecord {
+  id: string;
+  transactionId: string;
+  hashscanUrl: string;
+  amount: string;
+  from: string;
+  to: string;
+  query: string;
+  attestation: string;
+  timestamp: string;
+  status: 'confirmed';
+}
+const recentTransactions: TxRecord[] = [];
+function addTxRecord(r: TxRecord) {
+  recentTransactions.unshift(r);       // newest first
+  if (recentTransactions.length > 20) recentTransactions.pop();
+}
+
 async function start(): Promise<void> {
   const server = Fastify({
     logger: { level: process.env.LOG_LEVEL || 'info' },
@@ -45,6 +64,7 @@ async function start(): Promise<void> {
       query: 'POST /api/v1/query',
       info: 'GET /api/v1/info',
       metrics: 'GET /api/v1/metrics',
+      transactions: 'GET /api/v1/transactions',
     },
     confidentialCompute: {
       provider: 'Chainlink CRE',
@@ -80,15 +100,42 @@ async function start(): Promise<void> {
 
     const result = await callConfidentialUpstream(query, context);
 
+    const txId: string = paymentInfo?.transactionId ?? '';
+    const priceHbar = process.env.X402_PRICE_HBAR || '0.5';
+
+    // ── Record real transaction for the dashboard ──────────────────────────
+    // Build the correct HashScan URL:
+    // SDK format  : 0.0.ACCT@SECS.NANOS
+    // HashScan URL: 0.0.ACCT-SECS-NANOS
+    const hashscanId = txId.replace('@', '-').replace(/\.(\d+)$/, '-$1');
+    const isMock = process.env.MOCK_PAYMENTS === 'true';
+
+    addTxRecord({
+      id: result.queryId,
+      transactionId: txId,
+      hashscanUrl: isMock
+        ? '#'
+        : `https://hashscan.io/testnet/transaction/${hashscanId}`,
+      amount: `${priceHbar} HBAR`,
+      from: paymentInfo?.accountId ?? 'agent',
+      to: process.env.X402_MERCHANT_ACCOUNT_ID ?? 'merchant',
+      query: query.slice(0, 80),
+      attestation: result.attestation,
+      timestamp: new Date().toISOString(),
+      status: 'confirmed',
+    });
+
     return reply.code(200).send({
       success: true,
       data: result.payload,
       meta: {
         queryId: result.queryId,
         hedgera: {
-          transactionId: paymentInfo?.transactionId,
+          transactionId: txId,
+          hashscanUrl: isMock ? null : `https://hashscan.io/testnet/transaction/${hashscanId}`,
           settlementStatus: 'confirmed',
-          amountPaid: `${process.env.X402_PRICE_HBAR || '0.5'} HBAR`,
+          amountPaid: `${priceHbar} HBAR`,
+          mock: isMock,
         },
         confidentialCompute: {
           provider: 'Chainlink CRE',
@@ -116,11 +163,19 @@ async function start(): Promise<void> {
     teeExecutions: requestCount,
     facilitator: 'Blocky402',
     network: 'hedera-testnet',
+    mockMode: process.env.MOCK_PAYMENTS === 'true',
+  }));
+
+  // ── Real Transactions Feed (for dashboard) ────────────────────────────────
+  server.get('/api/v1/transactions', async () => ({
+    transactions: recentTransactions,
+    total: recentTransactions.length,
+    mockMode: process.env.MOCK_PAYMENTS === 'true',
   }));
 
   // ── Error Handling ─────────────────────────────────────────────────────────
   server.setErrorHandler(async (error, _request, reply) => {
-    if (error instanceof X402ChallengeError) return; // Already handled
+    if (error instanceof X402ChallengeError) return;
     server.log.error(error);
     return reply.code(500).send({
       error: 'Internal Server Error',
@@ -132,6 +187,7 @@ async function start(): Promise<void> {
   const PORT = parseInt(process.env.PORT || '3000', 10);
   try {
     await server.listen({ port: PORT, host: '0.0.0.0' });
+    const mode = process.env.MOCK_PAYMENTS === 'true' ? '🔧 MOCK' : '⛓️  REAL';
     console.log(`
   ╔══════════════════════════════════════════════════╗
   ║          🤖 VendingAgent – ETHOnline 2026        ║
@@ -141,6 +197,7 @@ async function start(): Promise<void> {
   ║  Gateway  → x402 / Hedera Testnet / Blocky402   ║
   ║  Compute  → Chainlink CRE TEE (handlerInTee)    ║
   ║  Agent    → MCP + Bazantic Recipe               ║
+  ║  Mode     → ${mode} payments                    ║
   ╚══════════════════════════════════════════════════╝
     `);
   } catch (err) {

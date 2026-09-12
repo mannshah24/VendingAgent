@@ -865,12 +865,80 @@
         const h = Math.floor(up / 3600), m = Math.floor((up % 3600) / 60), s = up % 60;
         document.getElementById('metric-uptime').textContent =
           h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+
+        // Show REAL vs MOCK badge in header
+        const badge = document.getElementById('mode-badge');
+        if (badge) {
+          badge.textContent = data.mockMode ? '🔧 MOCK MODE' : '⛓️ REAL ON-CHAIN';
+          badge.style.color = data.mockMode ? 'var(--warn)' : 'var(--green)';
+        }
       }
     } catch {}
   }
 
-  setInterval(pollMetrics, 5000);
+  // ── Real Transactions Polling ─────────────────────────────────────────────
+  // Fetches /api/v1/transactions every 4s and renders the table with
+  // real Hedera tx IDs and clickable HashScan links.
+
+  let lastTxCount = 0;
+
+  async function pollTransactions() {
+    try {
+      const res = await fetch('/api/v1/transactions');
+      if (!res.ok) return;
+      const data = await res.json();
+      const txs = data.transactions || [];
+
+      if (txs.length === 0 || txs.length === lastTxCount) return;
+      lastTxCount = txs.length;
+
+      const tbody = document.getElementById('tx-tbody');
+      tbody.innerHTML = ''; // clear placeholder / old entries
+
+      txs.forEach(tx => {
+        const isReal = tx.hashscanUrl && tx.hashscanUrl !== '#';
+        const shortTxId = tx.transactionId
+          ? tx.transactionId.slice(0, 24) + '…'
+          : 'mock-tx';
+
+        const txLink = isReal
+          ? `<a href="${tx.hashscanUrl}" target="_blank" rel="noopener"
+               style="color:var(--accent);text-decoration:none;font-family:var(--mono);font-size:0.78rem"
+               title="${tx.transactionId}">
+               ${shortTxId} ↗
+             </a>`
+          : `<span style="font-family:var(--mono);font-size:0.78rem;color:var(--muted)">${shortTxId}</span>`;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${txLink}</td>
+          <td style="font-family:var(--mono);font-size:0.78rem">${tx.from || 'agent'}</td>
+          <td style="color:var(--green)">${tx.amount}</td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+              title="${tx.query}">${tx.query}</td>
+          <td style="color:var(--accent);font-family:var(--mono);font-size:0.75rem">${(tx.attestation||'').slice(0,20)}…</td>
+          <td class="status-confirmed">● ${isReal ? 'On-Chain' : 'Mock'}</td>
+          <td>${new Date(tx.timestamp).toLocaleTimeString()}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Also update attestation inspector with latest tx
+      if (txs[0]) {
+        document.getElementById('att-status').textContent = '✅ VERIFIED';
+        document.getElementById('att-status').style.color = 'var(--green)';
+        document.getElementById('att-enclave').textContent = txs[0].attestation?.split(':')[1] || '';
+        document.getElementById('att-proof').textContent   = txs[0].attestation || '';
+        document.getElementById('att-tx').textContent      = txs[0].transactionId || '';
+        document.getElementById('att-amount').textContent  = txs[0].amount || '';
+      }
+    } catch {}
+  }
+
+  setInterval(pollMetrics,      5000);
+  setInterval(pollTransactions, 4000);
   pollMetrics();
+  pollTransactions();
 </script>
 </body>
 </html>
