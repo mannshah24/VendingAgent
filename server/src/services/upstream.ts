@@ -76,14 +76,30 @@ async function fetchAlphaVantageData(
   apiKey: string,
   apiBase: string
 ): Promise<Record<string, unknown>> {
-  // Parse the query to determine what data to fetch
   const symbol = extractTickerSymbol(query) || 'IBM';
-  const url = `${apiBase}?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`;
 
+  // AlphaVantage only supports stocks/ETFs — not native crypto like HBAR/BTC/ETH.
+  // Fall back to simulated data for crypto so the dashboard always shows something.
+  const cryptoSymbols = new Set(['HBAR', 'BTC', 'ETH', 'LINK', 'SOL', 'AVAX', 'MATIC', 'DOT']);
+  if (cryptoSymbols.has(symbol)) {
+    console.log(`  ℹ️  [TEE] ${symbol} is a crypto – AlphaVantage doesn't support it; using simulated data`);
+    return fetchSimulatedData(query, crypto.randomUUID());
+  }
+
+  const url = `${apiBase}?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`;
   const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   if (!resp.ok) throw new Error(`AlphaVantage API error: HTTP ${resp.status}`);
 
-  return resp.json() as Promise<Record<string, unknown>>;
+  const data = await resp.json() as Record<string, unknown>;
+
+  // If AlphaVantage returns empty Global Quote (unknown symbol), fall back to simulated
+  const quote = (data['Global Quote'] as Record<string, unknown>) || {};
+  if (!quote['05. price']) {
+    console.log(`  ⚠️  [TEE] AlphaVantage returned no price for ${symbol} – using simulated data`);
+    return fetchSimulatedData(query, crypto.randomUUID());
+  }
+
+  return data;
 }
 
 /**
@@ -160,11 +176,39 @@ function generateTeeAttestation(
  * e.g. "What is the price of HBAR?" → "HBAR"
  */
 function extractTickerSymbol(query: string): string | null {
-  const upperQuery = query.toUpperCase();
-  const knownTokens = ['HBAR', 'BTC', 'ETH', 'LINK', 'IBM', 'AAPL', 'TSLA', 'SOL', 'AVAX'];
-  for (const token of knownTokens) {
-    if (upperQuery.includes(token)) return token;
+  const lower = query.toLowerCase();
+  const upper = query.toUpperCase();
+
+  // Natural language aliases → ticker
+  const aliases: Record<string, string> = {
+    'bitcoin':   'BTC',
+    'ethereum':  'ETH',
+    'hedera':    'HBAR',
+    'chainlink': 'LINK',
+    'solana':    'SOL',
+    'avalanche': 'AVAX',
+    'polygon':   'MATIC',
+    'polkadot':  'DOT',
+    'apple':     'AAPL',
+    'tesla':     'TSLA',
+    'nvidia':    'NVDA',
+    'microsoft': 'MSFT',
+    'google':    'GOOGL',
+    'amazon':    'AMZN',
+    'meta':      'META',
+    'netflix':   'NFLX',
+  };
+  for (const [word, ticker] of Object.entries(aliases)) {
+    if (lower.includes(word)) return ticker;
   }
+
+  // Exact uppercase ticker in the string (e.g. "HBAR price", "AAPL stock")
+  const knownTickers = ['HBAR', 'BTC', 'ETH', 'LINK', 'IBM', 'AAPL', 'TSLA', 'SOL', 'AVAX', 'NVDA', 'MSFT', 'GOOGL'];
+  for (const token of knownTickers) {
+    if (upper.includes(token)) return token;
+  }
+
+  // Generic: find a 2-5 char all-caps word
   const match = query.match(/\b([A-Z]{2,5})\b/);
   return match ? match[1] : null;
 }

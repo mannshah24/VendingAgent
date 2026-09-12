@@ -1014,43 +1014,61 @@
       const tx   = data.meta?.hedgera;
       const tee  = data.meta?.confidentialCompute;
       const d    = data.data;
-      const quote = d?.['Global Quote'] || d || {};
-      const symbol = quote['01. symbol'] || '—';
-      const price  = quote['05. price']  || quote.price || '—';
-      const change = quote['09. change'] || '—';
-      const pct    = quote['10. change percent'] || '—';
-      const vol    = quote['06. volume']  || '—';
-      const isReal = tx?.hashscanUrl && tx.hashscanUrl !== 'null' && tx.hashscanUrl !== null;
+
+      // ── Robust data extraction: handle both AlphaVantage and simulated formats ──
+      // AlphaVantage: { "Global Quote": { "01. symbol": ..., "05. price": ... } }
+      // Simulated:    same structure (fetchSimulatedData returns Global Quote format)
+      // Fallback:     flat { symbol, price, change } from any other upstream
+      const quote   = d?.['Global Quote'] || d || {};
+      const symbol  = quote['01. symbol'] || quote['symbol'] || quote['ticker'] || '—';
+      const price   = parseFloat(quote['05. price']  || quote['price']  || '0') || 0;
+      const change  = parseFloat(quote['09. change'] || quote['change'] || '0') || 0;
+      const pctRaw  = quote['10. change percent'] || quote['changePercent'] || '';
+      const pct     = pctRaw || (price ? `${((change/price)*100).toFixed(4)}%` : '—');
+      const vol     = quote['06. volume'] || quote['volume'] || '—';
+      const day     = quote['07. latest trading day'] || new Date().toISOString().split('T')[0];
+
+      const priceStr  = price  ? `$${parseFloat(price.toString()).toFixed(4)}`  : '$—';
+      const changeStr = change ? `${change > 0 ? '+' : ''}${change.toFixed(4)}` : '—';
+      const volStr    = vol && vol !== '—' ? Number(vol).toLocaleString() : '—';
+      const isUp      = change >= 0;
+      const isReal    = tx?.hashscanUrl && tx.hashscanUrl !== 'null' && tx.hashscanUrl !== null;
 
       const hashscanLink = isReal
         ? `<a href="${tx.hashscanUrl}" target="_blank" rel="noopener"
-             style="color:var(--accent);text-decoration:none">
-             ${tx.transactionId} ↗ HashScan
-           </a>`
-        : `<span style="color:var(--muted)">${tx?.transactionId || 'mock-tx'} (mock mode)</span>`;
+               style="color:var(--accent);text-decoration:none;word-break:break-all">
+               ${tx.transactionId} ↗ HashScan
+             </a>`
+        : `<span style="color:var(--muted);word-break:break-all;font-size:0.78rem">
+               ${tx?.transactionId || 'demo-tx'}<br>
+               <span style="color:var(--warn);font-size:0.72rem">⚠️ Browser demo — run agent/client.ts for real on-chain tx</span>
+             </span>`;
 
       content.innerHTML = `
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
   <div>
-    <div style="color:var(--muted);font-size:0.72rem;margin-bottom:4px">📊 MARKET DATA (Chainlink CRE TEE)</div>
-    <div style="color:var(--green);font-size:1.4rem;font-weight:700">${symbol}</div>
-    <div style="font-size:1.1rem;margin:4px 0">$${price}</div>
-    <div style="color:${parseFloat(change)>=0?'var(--green)':'var(--danger)'}">
-      ${change} (${pct})
+    <div style="color:var(--muted);font-size:0.72rem;letter-spacing:.08em;margin-bottom:8px">📊 MARKET DATA (Chainlink CRE TEE)</div>
+    <div style="color:var(--accent);font-size:1.6rem;font-weight:800;letter-spacing:.04em">${symbol}</div>
+    <div style="font-size:1.3rem;font-weight:600;margin:6px 0">${priceStr}</div>
+    <div style="color:${isUp ? 'var(--green)' : 'var(--danger)'};font-size:0.9rem;font-weight:500">
+      ${isUp ? '▲' : '▼'} ${changeStr} &nbsp;(${pct})
     </div>
-    <div style="color:var(--muted);margin-top:6px;font-size:0.78rem">Volume: ${Number(vol).toLocaleString() || vol}</div>
+    <div style="color:var(--muted);margin-top:10px;font-size:0.78rem">
+      <span style="margin-right:16px">Vol: ${volStr}</span>
+      <span>${day}</span>
+    </div>
   </div>
   <div>
-    <div style="color:var(--muted);font-size:0.72rem;margin-bottom:4px">💰 HEDERA SETTLEMENT</div>
-    <div style="font-size:0.8rem;margin-bottom:6px">${hashscanLink}</div>
+    <div style="color:var(--muted);font-size:0.72rem;letter-spacing:.08em;margin-bottom:8px">💰 HEDERA SETTLEMENT</div>
+    <div style="margin-bottom:10px;line-height:1.5">${hashscanLink}</div>
     <div style="color:var(--muted);font-size:0.72rem;margin-bottom:2px">Amount Paid</div>
-    <div style="color:var(--hedera)">${tx?.amountPaid || '0.5 HBAR'}</div>
-    <div style="color:var(--muted);font-size:0.72rem;margin-top:8px;margin-bottom:2px">🔒 TEE ATTESTATION</div>
-    <div style="word-break:break-all;font-size:0.7rem;color:var(--accent)">${(tee?.attestation||'').slice(0,48)}…</div>
-    <div style="color:var(--green);font-size:0.75rem;margin-top:4px">✅ executedInTee: ${tee?.executedInTee}</div>
+    <div style="color:var(--hedera);font-weight:600;margin-bottom:10px">${tx?.amountPaid || '0.5 HBAR'}</div>
+    <div style="color:var(--muted);font-size:0.72rem;margin-bottom:4px">🔒 TEE ATTESTATION</div>
+    <div style="word-break:break-all;font-size:0.7rem;color:var(--accent);margin-bottom:4px">${(tee?.attestation||'').slice(0,52)}…</div>
+    <div style="color:var(--green);font-size:0.75rem">✅ executedInTee: ${tee?.executedInTee}</div>
   </div>
-</div>
-      `;
+</div>`;
+
 
       // force the tx table to refresh immediately
       lastTxCount = 0;
