@@ -1,0 +1,152 @@
+import 'dotenv/config';
+import Fastify from 'fastify';
+import fastifyCors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
+import path from 'path';
+import { x402Middleware, X402ChallengeError } from './middleware/x402';
+import { callConfidentialUpstream } from './services/upstream';
+
+let requestCount = 0;
+let paymentTotal = 0;
+
+async function start(): Promise<void> {
+  const server = Fastify({
+    logger: { level: process.env.LOG_LEVEL || 'info' },
+  });
+
+  // ── Plugins ────────────────────────────────────────────────────────────────
+  await server.register(fastifyCors, { origin: '*' });
+  await server.register(fastifyStatic, {
+    root: path.join(__dirname, 'public'),
+    prefix: '/',
+  });
+
+  // ── Health Check ───────────────────────────────────────────────────────────
+  server.get('/health', async () => ({
+    status: 'ok',
+    service: 'VendingAgent',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    tracks: ['Hedera x402', 'Chainlink CRE TEE', 'Bazantic MCP'],
+  }));
+
+  // ── Service Info (x402 discovery) ─────────────────────────────────────────
+  server.get('/api/v1/info', async () => ({
+    service: 'VendingAgent',
+    description: 'Pay-per-call confidential AI API proxy – ETHOnline 2026',
+    pricePerCall: {
+      amount: parseFloat(process.env.X402_PRICE_HBAR || '0.5'),
+      denomination: 'HBAR',
+      network: 'hedera-testnet',
+      facilitator: 'Blocky402',
+      merchantAccount: process.env.X402_MERCHANT_ACCOUNT_ID,
+    },
+    endpoints: {
+      query: 'POST /api/v1/query',
+      info: 'GET /api/v1/info',
+      metrics: 'GET /api/v1/metrics',
+    },
+    confidentialCompute: {
+      provider: 'Chainlink CRE',
+      mode: 'handlerInTee',
+      attestation: true,
+    },
+    mcp: {
+      server: `${process.env.SERVER_BASE_URL || 'http://localhost:3001'}/mcp`,
+      recipe: 'bazantic/recipe.json',
+    },
+  }));
+
+  // ── Core Pay-gated Query Endpoint ─────────────────────────────────────────
+  server.post<{
+    Body: { query: string; context?: Record<string, unknown> };
+  }>('/api/v1/query', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['query'],
+        properties: {
+          query: { type: 'string', minLength: 1, maxLength: 2000 },
+          context: { type: 'object' },
+        },
+      },
+    },
+    preHandler: x402Middleware,
+  }, async (request, reply) => {
+    const { query, context } = request.body;
+    const paymentInfo = (request as any).x402Payment;
+
+    server.log.info({ query, paymentInfo }, '✅ Payment verified – routing to TEE enclave');
+
+    const result = await callConfidentialUpstream(query, context);
+
+    return reply.code(200).send({
+      success: true,
+      data: result.payload,
+      meta: {
+        queryId: result.queryId,
+        hedgera: {
+          transactionId: paymentInfo?.transactionId,
+          settlementStatus: 'confirmed',
+          amountPaid: `${process.env.X402_PRICE_HBAR || '0.5'} HBAR`,
+        },
+        confidentialCompute: {
+          provider: 'Chainlink CRE',
+          attestation: result.attestation,
+          executedInTee: true,
+          enclaveId: result.enclaveId,
+        },
+        timestamp: new Date().toISOString(),
+      },
+    });
+  });
+
+  // ── Metrics ───────────────────────────────────────────────────────────────
+  server.addHook('onResponse', async (request) => {
+    if (request.url === '/api/v1/query') {
+      requestCount++;
+      paymentTotal += parseFloat(process.env.X402_PRICE_HBAR || '0.5');
+    }
+  });
+
+  server.get('/api/v1/metrics', async () => ({
+    totalRequests: requestCount,
+    totalHBARSettled: paymentTotal,
+    uptime: process.uptime(),
+    teeExecutions: requestCount,
+    facilitator: 'Blocky402',
+    network: 'hedera-testnet',
+  }));
+
+  // ── Error Handling ─────────────────────────────────────────────────────────
+  server.setErrorHandler(async (error, _request, reply) => {
+    if (error instanceof X402ChallengeError) return; // Already handled
+    server.log.error(error);
+    return reply.code(500).send({
+      error: 'Internal Server Error',
+      message: process.env.NODE_ENV === 'development' ? error.message : 'An unexpected error occurred',
+    });
+  });
+
+  // ── Start ──────────────────────────────────────────────────────────────────
+  const PORT = parseInt(process.env.PORT || '3000', 10);
+  try {
+    await server.listen({ port: PORT, host: '0.0.0.0' });
+    console.log(`
+  ╔══════════════════════════════════════════════════╗
+  ║          🤖 VendingAgent – ETHOnline 2026        ║
+  ║  Decentralized Pay-Per-Call AI API Gateway       ║
+  ╠══════════════════════════════════════════════════╣
+  ║  Server   → http://localhost:${PORT}              ║
+  ║  Gateway  → x402 / Hedera Testnet / Blocky402   ║
+  ║  Compute  → Chainlink CRE TEE (handlerInTee)    ║
+  ║  Agent    → MCP + Bazantic Recipe               ║
+  ╚══════════════════════════════════════════════════╝
+    `);
+  } catch (err) {
+    server.log.error(err);
+    process.exit(1);
+  }
+}
+
+start();
