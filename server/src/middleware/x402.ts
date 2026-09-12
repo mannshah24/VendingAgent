@@ -240,9 +240,14 @@ async function verifyViaMirrorNode(
   expectedAmountHbar: number
 ): Promise<{ success: boolean; reason?: string }> {
   try {
-    // Normalize transaction ID: replace @ with - for mirror node URL format
-    const normalizedId = transactionId.replace('@', '-').replace('.', '-');
+    // Normalize Hedera tx ID for Mirror Node REST API:
+    // SDK format  : 0.0.10503208@1789235210.444516744
+    // Mirror Node : 0.0.10503208-1789235210-444516744
+    const normalizedId = transactionId
+      .replace('@', '-')          // @ → -  (separates account from timestamp)
+      .replace(/\.(\d+)$/, '-$1'); // final .NANOS → -NANOS  (keeps shard.realm.num intact)
     const mirrorUrl = `https://testnet.mirrornode.hedera.com/api/v1/transactions/${encodeURIComponent(normalizedId)}`;
+
 
     const resp = await fetch(mirrorUrl, { signal: AbortSignal.timeout(15_000) });
 
