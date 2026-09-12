@@ -16,7 +16,7 @@
 
 > **Judges:** This section maps each track requirement directly to specific files and line numbers.
 
-### ✅ Hedera – AI & Agentic Payments ($6,000)
+### ✅ Hedera Track – AI & Agentic Payments on Hedera
 
 | Requirement | File | What to Look For |
 |---|---|---|
@@ -41,7 +41,7 @@
 
 ---
 
-### ✅ Chainlink – Best Confidential Workflow ($2,000)
+### ✅ Chainlink Track – Best Confidential Workflow
 
 | Requirement | File | What to Look For |
 |---|---|---|
@@ -58,7 +58,7 @@
 
 ---
 
-### ✅ Bazantic – Agentify a New API ($1,000)
+### ✅ Bazantic Track – Agentify a New API
 
 | Requirement | File | What to Look For |
 |---|---|---|
