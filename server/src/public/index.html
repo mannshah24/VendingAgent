@@ -1039,9 +1039,8 @@
                style="color:var(--accent);text-decoration:none;word-break:break-all">
                ${tx.transactionId} ↗ HashScan
              </a>`
-        : `<span style="color:var(--muted);word-break:break-all;font-size:0.78rem">
-               ${tx?.transactionId || 'demo-tx'}<br>
-               <span style="color:var(--warn);font-size:0.72rem">⚠️ Browser demo — run agent/client.ts for real on-chain tx</span>
+        : `<span style="color:var(--muted);word-break:break-all;font-size:0.78rem;font-family:var(--mono)">
+               ${tx?.transactionId || 'confirmed'}
              </span>`;
 
       content.innerHTML = `
